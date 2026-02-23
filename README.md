@@ -4,6 +4,21 @@
 
 ---
 
+## Supported Coins
+
+This system supports **NGC (New Generation Currency) series coins only.**
+
+| Denomination | Diameter | Material |
+|---|---|---|
+| ₱1  | 23.0 mm | Nickel-plated steel |
+| ₱5  | 25.0 mm | Nickel-plated steel |
+| ₱10 | 27.0 mm | Bimetallic |
+| ₱20 | 30.0 mm | Bimetallic ring |
+
+> **Note:** Old series coins and ₱0.25 centavo coins are not supported and will show as `Unknown`.
+
+---
+
 ## Setup (Do This First)
 
 **1. Make sure Python is installed**  
@@ -39,10 +54,21 @@ The result is also saved as `result.jpg`.
 
 ## Image Tips (Important for Accuracy)
 
-- Use a **plain white or dark solid background**
-- Coins should **not overlap**
-- Good, even lighting — no harsh shadows
-- Higher resolution = better results
+**Background**
+- Use a **plain dark/black matte surface** — black felt, dark cardboard, or dark cloth work best
+- Avoid white or light backgrounds — silver coins (₱1, ₱5, ₱10) blend in and edges become hard to detect
+- Avoid patterned or glossy surfaces — patterns cause false circle detections, gloss causes reflections
+
+**Lighting**
+- Use **diffused, even lighting** — ceiling light or overcast daylight is ideal
+- Avoid direct lamps or flash pointed straight down — coin reflections confuse edge detection
+- Tilt your light source slightly off-center to reduce hotspots on metallic surfaces
+
+**Shooting**
+- Shoot **top-down** (directly above, not at an angle)
+- Coins must **not overlap or stack**
+- Recommended image size: **2000–4000px** on the longest side
+- Each coin should appear at least **80–100px in diameter** in the image
 
 ---
 
@@ -54,6 +80,17 @@ The result is also saved as `result.jpg`.
 | `-r` | Reference coin denomination for calibration | `₱5` |
 | `-o` | Output filename for the annotated image | `result.jpg` |
 | `--no-display` | Don't open a preview window | off |
+
+**Tip:** The `-r` flag matters. Set it to a denomination you know is in the image for the most accurate size calibration. For example, if your image only has ₱10 and ₱20 coins, pass `-r ₱10`.
+
+---
+
+## Known Limitations
+
+- **Old series coins** — not supported. Pre-NGC coins share near-identical diameters with NGC coins and will misclassify.
+- **₱0.25 centavo** — out of circulation, not in the classification table.
+- **Overlapping coins** — cannot be separated. Spread coins flat before shooting.
+- **Poor lighting** — reflections or shadows will cause missed or false detections.
 
 ---
 

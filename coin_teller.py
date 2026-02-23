@@ -8,6 +8,21 @@ Detects and classifies Philippine Peso coins from a static image using:
   - Hough Circle Transform (shape detection)
   - Pixel-to-mm calibration (size measurement)
   - Diameter-based classification (coin lookup table)
+
+SCOPE & LIMITATIONS:
+  - Supports NEW GENERATION CURRENCY (NGC) series coins only.
+    Old series coins (pre-BSP redesign) share near-identical diameters
+    with each other and with NGC coins, making diameter-only classification
+    unreliable. Mixed old/new sets WILL produce misclassifications.
+  - ₱0.25 (25-centavo) coins are NOT supported — out of active circulation.
+  - Overlapping coins cannot be separated by Hough Circle Transform.
+  - Requires clear, even lighting and a plain solid-colored background.
+
+SUPPORTED COINS (NGC Series):
+  ₱1  — 23.0 mm — Nickel-plated steel
+  ₱5  — 25.0 mm — Nickel-plated steel
+  ₱10 — 27.0 mm — Bimetallic
+  ₱20 — 30.0 mm — Bimetallic ring (bronze outer, nickel center)
 """
 
 import cv2
@@ -18,16 +33,20 @@ from collections import defaultdict
 
 # ─────────────────────────────────────────────
 # PHILIPPINE PESO COIN SPECIFICATIONS (in mm)
+# NGC (New Generation Currency) series ONLY.
+# Old series coins are a known limitation — see module docstring.
 # ─────────────────────────────────────────────
 COIN_SPECS = {
-    "₱1":  {"diameter_mm": 20.0, "color": (255, 215,   0)},   # gold
-    "₱5":  {"diameter_mm": 24.0, "color": (192, 192, 192)},   # silver
-    "₱10": {"diameter_mm": 26.5, "color": (184, 134,  11)},   # gold/bimetallic
-    "₱20": {"diameter_mm": 28.0, "color": (0,   200, 100)},   # green label
+    "₱1":  {"diameter_mm": 23.0, "tolerance_mm": 1.0, "color": (192, 192, 192)},   # nickel-plated steel, silver
+    "₱5":  {"diameter_mm": 25.0, "tolerance_mm": 1.0, "color": (192, 192, 192)},   # nickel-plated steel, silver
+    "₱10": {"diameter_mm": 27.0, "tolerance_mm": 1.0, "color": (192, 192, 192)},   # bimetallic, silver
+    "₱20": {"diameter_mm": 30.0, "tolerance_mm": 1.8, "color": (0,   200, 100)},   # bimetallic ring, wider tolerance for calibration drift
 }
 
-# Tolerance in mm for diameter matching
-TOLERANCE_MM = 1.5
+# Default fallback tolerance if a coin entry is missing tolerance_mm.
+# Per-coin tolerances in COIN_SPECS take priority.
+# ₱20 uses 1.8mm to account for calibration drift on the larger diameter.
+TOLERANCE_MM = 1.0
 
 # ─────────────────────────────────────────────
 # COIN VALUES
@@ -65,21 +84,25 @@ def detect_circles(blurred: np.ndarray, img_height: int) -> np.ndarray | None:
         dp=1.2,
         minDist=int(img_height * 0.08),   # coins must be this far apart
         param1=60,    # upper Canny threshold
-        param2=35,    # accumulator threshold (lower = more detections)
+        param2=100,    # accumulator threshold (lower = more detections)
         minRadius=min_r,
         maxRadius=max_r,
     )
     return circles
 
 
-def calibrate(circles: np.ndarray, ref_diameter_mm: float = 24.0) -> float:
+def calibrate(circles: np.ndarray, ref_diameter_mm: float = 25.0) -> float:
     """
     Calibration: use the MEDIAN detected circle radius as the reference.
-    Assumes the reference coin (default: ₱5 = 24mm) is present.
+    Assumes the reference coin (default: ₱5 NGC = 25mm) is present.
     Returns pixels-per-mm ratio.
 
-    For best accuracy, pass --ref-coin argument with the denomination
-    of a coin you know is in the image.
+    For best accuracy, pass --ref-coin with the denomination of a coin
+    you know is in the image.
+
+    NOTE: Calibration assumes the majority of coins in the image match
+    the reference denomination. For mixed-denomination sets, use a single
+    known reference coin placed prominently in the frame.
     """
     radii = circles[0, :, 2]
     median_radius_px = float(np.median(radii))
@@ -92,12 +115,18 @@ def calibrate(circles: np.ndarray, ref_diameter_mm: float = 24.0) -> float:
 
 
 def classify_coin(diameter_mm: float) -> str:
-    """Match a measured diameter to a known denomination."""
+    """
+    Match a measured diameter to a known NGC denomination.
+    Each coin uses its own tolerance_mm from COIN_SPECS (falls back to
+    the global TOLERANCE_MM if not set). Returns 'Unknown' if no match.
+    Old series coins and ₱0.25 will return 'Unknown'.
+    """
     best_match = "Unknown"
     best_diff = float("inf")
     for denomination, specs in COIN_SPECS.items():
+        tol = specs.get("tolerance_mm", TOLERANCE_MM)
         diff = abs(diameter_mm - specs["diameter_mm"])
-        if diff < best_diff and diff <= TOLERANCE_MM:
+        if diff < best_diff and diff <= tol:
             best_diff = diff
             best_match = denomination
     return best_match
@@ -200,6 +229,7 @@ def print_console_summary(tally: dict, total: float, px_per_mm: float) -> None:
     unknown = tally.get("Unknown", 0)
     if unknown:
         print(f"  Unknown coins (unclassified): {unknown}")
+        print(f"  [NOTE] Unknown coins may be old series or non-NGC denominations.")
     print(f"  TOTAL COIN COUNT : {sum(tally.values())}")
     print(f"  TOTAL VALUE      : ₱{total:.0f}")
     print("=" * 40 + "\n")
@@ -210,7 +240,16 @@ def print_console_summary(tally: dict, total: float, px_per_mm: float) -> None:
 # ─────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(
-        description="Digital Coin Teller — Philippine Peso coin detector"
+        description=(
+            "Digital Coin Teller — Philippine Peso coin detector\n"
+            "Supports NGC (New Generation Currency) series coins only:\n"
+            "  ₱1 (23mm), ₱5 (25mm), ₱10 (27mm), ₱20 (30mm)\n\n"
+            "Known limitations:\n"
+            "  - Old series coins will likely be misclassified\n"
+            "  - ₱0.25 coins are not supported (out of circulation)\n"
+            "  - Overlapping coins cannot be detected separately"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "-i", "--image", required=True,
@@ -219,7 +258,7 @@ def main():
     parser.add_argument(
         "-r", "--ref-coin", default="₱5",
         choices=list(COIN_SPECS.keys()),
-        help="Denomination of the reference coin used for calibration (default: ₱5)"
+        help="Denomination of the reference coin used for calibration (default: ₱5 NGC = 25mm)"
     )
     parser.add_argument(
         "-o", "--output", default="result.jpg",
@@ -235,6 +274,7 @@ def main():
     img = load_image(args.image)
     h, w = img.shape[:2]
     print(f"[INFO] Image loaded: {w}×{h} px")
+    print(f"[INFO] Mode: NGC series only | Tolerance: ±{TOLERANCE_MM}mm")
 
     # 2. Preprocess
     blurred = preprocess(img)
